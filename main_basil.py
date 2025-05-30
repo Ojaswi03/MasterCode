@@ -1,87 +1,90 @@
-# main_basil.py
-
+import os
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
-import os
-from models import MNISTModel
+
 from trainer import train
-from data.data_loader import load_mnist_data
-from acds import load_acds_mnist
-from WCM import worst_case_aggregate
+from data.mnist import load_mnist_data as load_data
+from attacks import apply_attack
+from models import create_model
+from EBM import ebm_training
+from WCM import run_wcm
+from FedAvg import run_fedavg
+from centralized import centralized_svm
 
-def user_input(prompt, default=None, val_type=str):
-    try:
-        value = input(prompt)
-        return val_type(value) if value != '' else default
-    except:
-        return default
+print("========== BASIL + NOISY CHANNEL EXPERIMENT ==========")
+nodes = int(input("Enter number of nodes [default=10]: ") or 10)
+rounds = int(input("Enter number of rounds [default=50]: ") or 50)
+lr = float(input("Enter learning rate [default=0.05]: ") or 0.05)
+alpha = float(input("Enter mixing coefficient alpha [default=0.1]: ") or 0.1)
+sigma = float(input("Enter communication noise std dev sigma [default=0.01]: ") or 0.01)
+use_wcm = input("Use Worst-Case Aggregation? (y/n) [default=n]: ") or 'n'
+attack_type = input("Enter attack type (none, gaussian, sign_flip, hidden) [default=none]: ") or 'none'
+iid = input("Use IID data split? (y/n) [default=n]: ") or 'n'
 
-if __name__ == "__main__":
-    print("========== BASIL + NOISY CHANNEL EXPERIMENT ==========")
-    num_nodes = user_input("Enter number of nodes [default=10]: ", 10, int)
-    num_rounds = user_input("Enter number of rounds [default=50]: ", 50, int)
-    lr = user_input("Enter learning rate [default=0.05]: ", 0.05, float)
-    alpha = user_input("Enter mixing coefficient alpha [default=0.1]: ", 0.1, float)
-    sigma = user_input("Enter communication noise std dev sigma [default=0.01]: ", 0.01, float)
-    use_wcm = user_input("Use Worst-Case Aggregation? (y/n) [default=n]: ", 'n') == 'y'
-    attack_type = user_input("Enter attack type (none, gaussian, sign_flip, hidden) [default=none]: ", 'none')
-    iid_choice = user_input("Use IID data split? (y/n) [default=n]: ", 'n') == 'y'
+print("\n========== Starting Training ==========")
 
-    # Load MNIST data
-    if iid_choice:
-        train_loaders, test_loaders, memory_loaders = load_mnist_data(num_nodes=num_nodes, non_iid=False)
-    else:
-        train_loaders, test_loaders, memory_loaders = load_acds_mnist(num_clients=num_nodes)
+train_loaders, test_loaders, memory_loaders = load_data(nodes, iid == 'y')
+models = [create_model() for _ in range(nodes)]
+neighbors = list(range(nodes))
 
-    # Initialize models for each node
-    models = [MNISTModel().model for _ in range(num_nodes)]
+# Run Basil baseline
+acc_list, loss_list = train(models, train_loaders, test_loaders, memory_loaders, neighbors,
+                            num_rounds=rounds, alpha=alpha, sigma=0.0, use_wcm=False)
 
-    # Define neighbor connections in logical ring
-    neighbors = [(i - 1) % num_nodes for i in range(num_nodes)]
+plt.plot(acc_list)
+plt.title("Basil Accuracy (No Attack)")
+plt.xlabel("Rounds")
+plt.ylabel("Accuracy")
+plt.savefig("basil_accuracy_no_attack.png")
+plt.clf()
 
-    print("\n========== Starting Training ==========")
-    acc_list, loss_list = train(
-        models=models,
-        train_loaders=train_loaders,
-        test_loaders=test_loaders,
-        memory_loaders=memory_loaders,
-        neighbors=neighbors,
-        num_rounds=num_rounds,
-        lr=lr,
-        alpha=alpha,
-        sigma=sigma,
-        use_wcm=use_wcm
-    )
+plt.plot(loss_list)
+plt.title("Basil Loss (No Attack)")
+plt.xlabel("Rounds")
+plt.ylabel("Loss")
+plt.savefig("basil_loss_no_attack.png")
+plt.clf()
 
-    print("\n========== Training Complete ==========")
-    for i, (acc, loss) in enumerate(zip(acc_list, loss_list)):
-        print(f"Round {i+1}: Accuracy = {acc:.4f}, Loss = {loss:.4f}")
+# Inject attack and noise
+attacks = ['none', 'gaussian', 'sign_flip', 'hidden']
+for att in attacks:
+    print(f"\nRunning training with {att} attack...")
+    models = [create_model() for _ in range(nodes)]
+    train_loaders_attacked = apply_attack(train_loaders, att, nodes)
 
-    print("\n========== Summary Across Attacks ==========")
-    print(f"Final Accuracy: {acc_list[-1]:.4f}")
-    print(f"Final Loss: {loss_list[-1]:.4f}")
+    acc_list, loss_list = train(models, train_loaders_attacked, test_loaders, memory_loaders, neighbors,
+                                num_rounds=rounds, alpha=alpha, sigma=sigma, use_wcm=(use_wcm == 'y'))
 
-    # Save plots to diagram folder
-    os.makedirs("diagram", exist_ok=True)
-    config_str = f"_{attack_type}_nodes{num_nodes}_rounds{num_rounds}_sigma{sigma:.3f}" + ("_wcm" if use_wcm else "") + ("_iid" if iid_choice else "_acds")
-
-    # Accuracy Plot
-    plt.figure()
-    plt.plot(range(1, num_rounds + 1), acc_list, label='Accuracy')
+    plt.plot(acc_list)
+    plt.title(f"Accuracy with {att} attack")
     plt.xlabel("Rounds")
     plt.ylabel("Accuracy")
-    plt.title("Test Accuracy per Round")
-    plt.grid(True)
-    plt.savefig(f"diagram/accuracy{config_str}.png")
-    plt.close()
+    plt.savefig(f"accuracy_{att}.png")
+    plt.clf()
 
-    # Loss Plot
-    plt.figure()
-    plt.plot(range(1, num_rounds + 1), loss_list, label='Loss', color='red')
+    plt.plot(loss_list)
+    plt.title(f"Loss with {att} attack")
     plt.xlabel("Rounds")
     plt.ylabel("Loss")
-    plt.title("Test Loss per Round")
-    plt.grid(True)
-    plt.savefig(f"diagram/loss{config_str}.png")
-    plt.close()
+    plt.savefig(f"loss_{att}.png")
+    plt.clf()
+
+# Run centralized baseline
+print("\nRunning Centralized SVM baseline...")
+train_loader_c, test_loader_c, _ = load_data(1, iid == 'y')
+centralized_svm(train_loader_c[0], test_loader_c[0], num_features=784, sigma=sigma, lr=lr, epochs=rounds)
+
+# Run Federated EBM
+print("\nRunning Federated EBM...")
+run_ebm(nodes, rounds, sigma)
+
+# Run Federated WCM
+print("\nRunning Federated WCM...")
+run_wcm(nodes, rounds, sigma)
+
+# Run FedAvg
+print("\nRunning Federated FedAvg...")
+run_fedavg(nodes, rounds, sigma)
+
+print("\nAll training completed. Plots saved.")

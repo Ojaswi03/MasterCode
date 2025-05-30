@@ -71,3 +71,9 @@ class CIFARModel:
 
     def __call__(self, x, training=False):
         return self.model(x, training=training)
+    
+def create_model(dataset="mnist"):
+    if dataset == "mnist":
+        return MNISTModel().model
+    else:
+        raise ValueError(f"Unsupported dataset type: {dataset}")

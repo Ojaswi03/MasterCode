@@ -3,8 +3,11 @@
 import numpy as np
 import tensorflow as tf
 
-def evaluate_model_loss(weights, model, data_loader, loss_fn):
+def evaluate_model_loss(weights, model_template, data_loader, loss_fn):
+    model = tf.keras.models.clone_model(model_template)
+    model.build(input_shape=(None, 28, 28))
     model.set_weights(weights)
+
     total_loss, total_samples = 0.0, 0
     for x_batch, y_batch in data_loader:
         logits = model(x_batch, training=False)
@@ -34,6 +37,6 @@ def worst_case_aggregate(local_weights, neighbor_weights, model_template, data_l
     neighbor_loss = evaluate_model_loss(neighbor_weights, model_template, data_loader, loss_fn)
 
     if neighbor_loss > local_loss + sigma:
-        return local_weights  # Reject neighbor
+        return local_weights  # Reject neighbor model
     else:
-        return [(1 - alpha) * lw + alpha * nw for lw, nw in zip(local_weights, neighbor_weights)]
+        return [(1 - alpha) * lw + alpha * nw for lw, nw in zip(local_weights, neighbor_weights)] #  Weighted average of local and neighbor weights

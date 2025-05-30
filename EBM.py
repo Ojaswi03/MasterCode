@@ -1,7 +1,7 @@
 # File: EBM.py
 
 import numpy as np
-from data.mnist import load_mnist
+from data.mnist import load_mnist_data
 from sklearn.metrics import accuracy_score
 import wandb
 
@@ -45,7 +45,7 @@ def ebm_training(num_clients=5, num_rounds=20, lr=0.01, lambd=0.01, sigma=0.1, b
         accs, losses: Lists of accuracy and loss per round.
     """
     print("[INFO] Loading data...")
-    X_train, X_test, y_train, y_test = load_mnist(binary=binary)
+    X_train, X_test, y_train, y_test = load_mnist_data(binary=binary)
     y_train_bin = 2 * y_train - 1
     y_test_bin = 2 * y_test - 1
 
